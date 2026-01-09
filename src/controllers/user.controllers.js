@@ -88,7 +88,12 @@ const registerUser = asyncHandler(async (req, res) => {
 })
 
 
+
+
+
   const loginUser = asyncHandler(async (req, res) => {
+    // console.log("STEP 1: Controller hit hua")
+    // console.log("BODY ->", req.body)
   const { email, userName, password } = req.body
 
   if (!email && !userName) {
@@ -108,7 +113,7 @@ const registerUser = asyncHandler(async (req, res) => {
 
   const isPasswordValid = await user.isPasswordCorrect(password)
   if (!isPasswordValid) {
-    throw new ApiError(401, "Invalid credentials")
+    throw new ApiError(401, "Password wrong hai")
   }
 
   const { accessToken, refreshToken } =
@@ -203,15 +208,17 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
     )
 })
 
-const updateCurrentUserPassword =asyncHandler(async (req, res)=>{
+const updateCurrentUserPassword = asyncHandler(async (req, res)=>{
+   console.log("update controller hit hua")
+   console.log("body", req.body)
   
     const {oldpassword, newpassword} =  req.body;
    const user = await User.findById(req.user?._id);
    if(!user){
-    throw new ApiError(400, "user is not authorized")
+    throw new ApiError(400, "user is not login")
    }
 
-   const isPasswordCorrect = user.isPasswordCorrect(oldpassword)
+   const isPasswordCorrect= await user.isPasswordCorrect(oldpassword)
    if(!isPasswordCorrect){
       throw new ApiError(400, "old password is incorrect")
    }
@@ -224,12 +231,15 @@ const updateCurrentUserPassword =asyncHandler(async (req, res)=>{
 
 })
 
-const getCurrentUser = asyncHandler( async(req, res)=>{
-    return res.
-    status(200).
-    json(200, req.user, "current user fetched successfully")
 
+const getCurrentUser = asyncHandler( async(req, res)=>{
+    const user = await User.findById(req.user?._id).select("-password -refreshToken")
+    if (!user) {
+      throw new ApiError(404, "User not found")
+    }
+    return res.status(200).json(new ApiResponse(200, user, "current user fetched successfully"))
 })
+
 
 const updateAccountDetails = asyncHandler(async (req, res) => {
   const { fullName, email } = req.body
@@ -309,6 +319,163 @@ const updateCoverPath = asyncHandler(async (req, res)=>{
 
 })
 
+const getUserById = asyncHandler(async (req, res) => {
+  const { userId } = req.query
+
+  if (!userId) {
+    throw new ApiError(400, "User ID is required")
+  }
+
+  const user = await User.findById(userId).select("-password -refreshToken")
+
+  if (!user) {
+    throw new ApiError(404, "User not found")
+  }
+
+  return res.status(200).json(new ApiResponse(200, user, "User fetched successfully"))
+})
+
+
+
+// 
+
+//
+
+//
+
+
+
+
+
+const getUserChannelProfile = asyncHandler(async(req, res) => {
+    const {username} = req.params
+
+    if (!username?.trim()) {
+        throw new ApiError(400, "username is missing")
+    }
+
+    const channel = await User.aggregate([
+        {
+            $match: {
+                username: username?.toLowerCase()
+            }
+        },
+        {
+            $lookup: {
+                from: "subscriptions",
+                localField: "_id",
+                foreignField: "channel",
+                as: "subscribers"
+            }
+        },
+        {
+            $lookup: {
+                from: "subscriptions",
+                localField: "_id",
+                foreignField: "subscriber",
+                as: "subscribedTo"
+            }
+        },
+        {
+            $addFields: {
+                subscribersCount: {
+                    $size: "$subscribers"
+                },
+                channelsSubscribedToCount: {
+                    $size: "$subscribedTo"
+                },
+                isSubscribed: {
+                    $cond: {
+                        if: {$in: [req.user?._id, "$subscribers.subscriber"]},
+                        then: true,
+                        else: false
+                    }
+                }
+            }
+        },
+        {
+            $project: {
+                fullName: 1,
+                username: 1,
+                subscribersCount: 1,
+                channelsSubscribedToCount: 1,
+                isSubscribed: 1,
+                avatar: 1,
+                coverImage: 1,
+                email: 1
+
+            }
+        }
+    ])
+
+    if (!channel?.length) {
+        throw new ApiError(404, "channel does not exists")
+    }
+
+    return res
+    .status(200)
+    .json(
+        new ApiResponse(200, channel[0], "User channel fetched successfully")
+    )
+})
+
+
+
+
+const getWatchHistory = asyncHandler(async(req, res) => {
+    const user = await User.aggregate([
+        {
+            $match: {
+                _id: new mongoose.Types.ObjectId(req.user._id)
+            }
+        },
+        {
+            $lookup: {
+                from: "videos",
+                localField: "watchHistory",
+                foreignField: "_id",
+                as: "watchHistory",
+                pipeline: [
+                    {
+                        $lookup: {
+                            from: "users",
+                            localField: "owner",
+                            foreignField: "_id",
+                            as: "owner",
+                            pipeline: [
+                                {
+                                    $project: {
+                                        fullName: 1,
+                                        username: 1,
+                                         avatar: 1
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        $addFields:{
+                            owner:{
+                                $first: "$owner"
+                            }
+                        }
+                    }
+                ]
+            }
+        }
+    ])
+
+    return res
+    .status(200)
+    .json(
+        new ApiResponse(
+            200,
+            user[0].watchHistory,
+            "Watch history fetched successfully"
+        )
+    )
+})
+
 
 
 export {
@@ -320,7 +487,11 @@ export {
   getCurrentUser, 
   updateAccountDetails,
   updateUserAvatar,
-  updateCoverPath
+  updateCoverPath,
+  getUserById,
+  getUserChannelProfile,
+  getWatchHistory
+  
 }
 
 
